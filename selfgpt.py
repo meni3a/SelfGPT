@@ -10,7 +10,7 @@ from twilio.twiml.messaging_response import MessagingResponse
 import pandas as pd
 
 # Open the yaml config file and load the variables
-with open("user/config/config.yaml", 'r') as stream:
+with open("config.yaml", 'r') as stream:
     config = yaml.safe_load(stream)
     OPENAI_KEY = config['OPENAI_KEY']
 
@@ -25,7 +25,7 @@ if not config_ok:
 
 print("\nOPENAI_KEY--> ", "\"" + OPENAI_KEY[0:2] + " ... " + OPENAI_KEY[-3:] + "\"\n")
 
-dbPath = "user/data/database.csv";
+dbPath = "database.csv"
 
 EMBEDDING_MODEL = 'text-embedding-ada-002'
 COMPLETIONS_MODEL = "text-davinci-003"
@@ -68,7 +68,7 @@ def wa_sms_reply():
     # Create reply
     # ========================================
     # Help menu
-    if msg.startswith("/h"):
+    if msg.startswith("/h") or msg.startswith("help"):
         reply.body("Commands:\n\n/q [question] - Ask a question\n/s [message] - Save a message\n/f [message] - Find related messages\n/h - Show this help menu")
 
     # Question answering
@@ -82,16 +82,16 @@ def wa_sms_reply():
         reply.body(response["choices"][0]["text"])
     
     # Save the message
-    elif msg.startswith("/s "):
-        data_to_save = msg.split("/s ")[1]
+    elif msg.startswith("remember ") or msg.startswith("save ") or msg.startswith("/s "):
+        data_to_save = msg.split(" ")[1]
         # Save the massage to the database
         text_embedding = get_embedding(data_to_save, engine='text-embedding-ada-002')
         df = df.append({"time":dt_string,"message":data_to_save, "ada_search": text_embedding},ignore_index=True)
         df.to_csv(dbPath,index=False)
-        reply.body("Message saved successfully!")
+        reply.body("I will remmber that!")
 
     # Find related messages
-    elif msg.startswith("/f "):
+    elif msg.startswith("/f ") or msg.startswith("find "):
         query = msg.split("/f ")[1]
         most_similar = return_most_similiar(query, df, top_n=3)
         msg_reply = ''
@@ -112,9 +112,15 @@ def wa_sms_reply():
             "max_tokens": 200,
             "model": COMPLETIONS_MODEL,
         }
-        response = openai.Completion.create(prompt=msg, **REGULAR_COMPLETIONS_API_PARAMS)
-        print (response)
-        reply.body(response["choices"][0]["text"])
+        prompt = construct_prompt(msg, df, top_n=3)
+        # Get the answer
+        response = openai.Completion.create(prompt=prompt, **QUESTION_COMPLETIONS_API_PARAMS)
+        result = response["choices"][0]["text"]
+        if result == "I don't know.":
+            extResponse = openai.Completion.create(prompt=msg, **REGULAR_COMPLETIONS_API_PARAMS)
+            reply.body(extResponse["choices"][0]["text"])
+        else:
+            reply.body(result)
         
     return str(resp)
 
@@ -153,4 +159,9 @@ if __name__ == "__main__":
         # Save the dataframe to a csv file
         df.to_csv(dbPath,index=False)
 
-    app.run(debug=True)
+    
+    app.run(
+        debug=True,
+        host="0.0.0.0",
+        port=5001
+    )
